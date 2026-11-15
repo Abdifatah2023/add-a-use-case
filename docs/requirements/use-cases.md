@@ -1477,17 +1477,17 @@ Details:
   - 5a1. The system leaves the student's account active and unchanged, and the use case ends.
 - **6a. The student is already deactivated:**
   - 6a1. The system alerts the course admin or instructor that this student is already deactivated, leaves the student's account unchanged, and the use case ends.
-- **6b. The instructor is not assigned to the student's course section:**
-  - 6b1. The system refuses the deactivation per BR-student-lifecycle, alerts the instructor that she is not authorized to deactivate this student, leaves the student's account unchanged, and the use case ends.
+- **6b. The course admin or instructor has no access to the student's course section** (an instructor not assigned to it, or a course admin who does not own its course):
+  - 6b1. The system refuses the deactivation per BR-student-lifecycle and BR-section-scoped-access, alerts the course admin or instructor that she is not authorized to deactivate this student, leaves the student's account unchanged, and the use case ends.
 
 **Priority:** Low
 **Frequency of Use:** Rare. Occurs occasionally when a student withdraws from a course section.
-**Business Rules:** BR-student-lifecycle, BR-submission-owed, BR-evaluatee-active
+**Business Rules:** BR-student-lifecycle, BR-section-scoped-access, BR-submission-owed, BR-evaluatee-active
 
 **Associated Information:**
 - Consequence of the deactivation (shown to the course admin or instructor in step 4): the student can no longer log in or reach any protected resource (FR-SEC-active-account); she stays in her course section and on her team, and her submitted weekly activity reports and peer evaluations are kept (BR-student-lifecycle); from then on she owes no weekly activity report or peer evaluation and her teammates owe no peer evaluation of her, so she drops out of reminders (BR-submission-owed); and her teammates can no longer evaluate her (BR-evaluatee-active). The account can be reactivated later (UC-STU-reactivate-student: Reactivate a student). This is distinct from deletion (UC-STU-delete-student: Delete a student), which is a physical, unrecoverable delete.
 - Effect on a session already in progress: if the student is logged in when she is deactivated, her next request is refused (FR-SEC-active-account). She does not keep access until her login expires.
-- Appearance in reports: a deactivated student stays listed in her course section's weekly peer evaluation report (UC-EVA-section-evaluation-report), marked as deactivated, with whatever peer evaluations of her were submitted for that week.
+- Appearance in reports: how a deactivated student appears in her course section's peer evaluation report is specified in that report's "Report generating parameters" (UC-EVA-section-evaluation-report: Generate a peer evaluation report of the entire course section).
 
 **Related Use Cases:** UC-STU-delete-student: Delete a student; UC-STU-reactivate-student: Reactivate a student
 **Assumptions:**
@@ -2215,9 +2215,9 @@ Report generating algorithm: N/A
 
 **Main Success Scenario:**
 1. The student indicates to submit a peer evaluation for the previous week.
-2. The system asks the student to provide peer evaluations for every team member.
+2. The system asks the student to provide peer evaluations for every team member whose account is active (BR-evaluatee-active).
 3. See the "Details" defined in the Associated Information of this use case.
-4. The student evaluates each team member (self included) and confirms that she has finished.
+4. The student evaluates each of those team members (self included) and confirms that she has finished.
 5. The system validates the student's inputs according to the "Details" defined in the Associated Information of this use case.
 6. The system displays the details of the peer evaluation and asks the student to confirm the evaluation and submission.
 7. The system notes that a submitted peer evaluation remains editable while its submission window is open; the student may re-submit it to update it until the window closes (BR-evaluation-editable-until-close, BR-evaluation-submission-window).
@@ -2238,15 +2238,18 @@ Report generating algorithm: N/A
 - **4a. Input validation rule violation:**
   - 4a1. The system alerts the student that an input validation rule is violated and displays the nature and location of the error.
   - 4a2. The student corrects the mistake and returns to step 4 of the normal flow.
+- **9a. A team member she evaluated was deactivated after step 2:**
+  - 9a1. The system does not accept the peer evaluation of that team member and informs the student that this team member is deactivated (BR-evaluatee-active); her peer evaluations of the other team members are unaffected.
+  - 9a2. Use case ends.
 
 **Priority:** High
 **Frequency of Use:** Approximately 35-40 users, 1 usage per week.
-**Business Rules:** BR-team-scoped-access (the student evaluates the members of a team she belongs to, and no other team), BR-team-assignment-required (only a student assigned to a team submits one), BR-active-weeks, BR-evaluation-editable-until-close, BR-evaluation-submission-window, BR-evaluation-private-comment
+**Business Rules:** BR-team-scoped-access (the student evaluates the members of a team she belongs to, and no other team), BR-team-assignment-required (only a student assigned to a team submits one), BR-active-weeks, BR-evaluation-editable-until-close, BR-evaluation-submission-window, BR-evaluation-private-comment, BR-evaluatee-active (a deactivated team member is not offered for evaluation)
 
 **Associated Information:**
 
 Details:
-- Every team member MUST be evaluated.
+- Every team member whose account is active MUST be evaluated.
 - Scores MUST be integers.
 
 Example (each team member, self included, is evaluated on every rubric criterion):
@@ -2363,6 +2366,7 @@ Report generating algorithm: For each individual criterion score (e.g., Quality 
 Report generating parameters:
 - Active week: Each peer evaluation report is associated with a week. The instructor shall first indicate for which active week she wants to generate a peer evaluation. E.g., "02-12-2024 to 02-18-2024"; by default, it shall be the previous week.
 - Columns to include: student name, grade, comments. See the example below.
+- Deactivated students: a student whose account is deactivated (UC-STU-deactivate-student: Deactivate a student) stays listed in the report and is marked as deactivated, with whatever peer evaluations of her were submitted for that week.
 - Sorting criteria: by default, sort by last name in ascending order.
 - Pagination: Not needed.
 - Format of the generated report: HTML.
