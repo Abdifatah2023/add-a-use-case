@@ -415,6 +415,52 @@ class EvaluationServiceTest {
     }
 
     @Test
+    void testAddPeerEvaluationOfADeactivatedEvaluatee() {
+        // Given: UC-EVA-submit-evaluation 9a, BR-evaluatee-active
+        LocalDate fixedDate = LocalDate.of(2023, 8, 8);
+        Clock fixedClock = Clock.fixed(fixedDate.atStartOfDay(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
+        given(this.clock.instant()).willReturn(fixedClock.instant());
+        given(this.clock.getZone()).willReturn(fixedClock.getZone());
+        this.eric.setEnabled(false);
+
+        PeerEvaluation newPeerEvaluation = new PeerEvaluation("2023-W31", john, eric, List.of(), "public comment", "private comment");
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.addPeerEvaluation(newPeerEvaluation));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(PeerEvaluationIllegalArgumentException.class)
+                .hasMessage("Eric Wong is deactivated and can no longer be evaluated.");
+        verify(this.evaluationRepository, times(0)).save(any(PeerEvaluation.class));
+    }
+
+    @Test
+    void testUpdatePeerEvaluationOfADeactivatedEvaluatee() {
+        // Given: re-submitting is submitting (BR-evaluation-editable-until-close), so the guard covers an edit too
+        LocalDate fixedDate = LocalDate.of(2023, 8, 8);
+        Clock fixedClock = Clock.fixed(fixedDate.atStartOfDay(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
+        given(this.clock.instant()).willReturn(fixedClock.instant());
+        given(this.clock.getZone()).willReturn(fixedClock.getZone());
+        this.eric.setEnabled(false);
+
+        PeerEvaluation oldPeerEvaluation = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "public comment", "private comment");
+        oldPeerEvaluation.setPeerEvaluationId(1);
+        PeerEvaluation update = new PeerEvaluation("2023-W31", this.john, this.eric, List.of(), "new public comment", "new private comment");
+        given(this.evaluationRepository.findById(1)).willReturn(Optional.of(oldPeerEvaluation));
+
+        // When
+        Throwable throwable = catchThrowable(() -> this.evaluationService.updatePeerEvaluation(1, update));
+
+        // Then
+        assertThat(throwable)
+                .isInstanceOf(PeerEvaluationIllegalArgumentException.class)
+                .hasMessage("Eric Wong is deactivated and can no longer be evaluated.");
+        assertThat(oldPeerEvaluation.getPublicComment()).isEqualTo("public comment");
+        verify(this.evaluationRepository, times(0)).save(any(PeerEvaluation.class));
+    }
+
+    @Test
     void testUpdatePeerEvaluation() {
         // Given
         // Aug 8, 2023 falls in 2023-W32, which makes 2023-W31 the previous week and this evaluation's window open
@@ -508,6 +554,7 @@ class EvaluationServiceTest {
         assertThat(peerEvaluationAverage.getLastName()).isEqualTo("Wong");
         assertThat(peerEvaluationAverage.getEmail()).isEqualTo("e.wong@abc.edu");
         assertThat(peerEvaluationAverage.getTeamName()).isEqualTo("Team1");
+        assertThat(peerEvaluationAverage.isDeactivated()).isFalse();
         assertThat(peerEvaluationAverage.getPublicComments()).containsAll(List.of("Eric did a great job this week! I think he is on track.", "As Eric, I just do my best!", "eric eric eric, go, go go!"));
         assertThat(peerEvaluationAverage.getPrivateComments()).containsAll(List.of("John wrote this private comment!", "I am eric.", "I am Jerry."));
         assertThat(peerEvaluationAverage.getAverageTotalScore()).isCloseTo(50.0, within(0.01));
@@ -517,6 +564,21 @@ class EvaluationServiceTest {
         assertThat(peerEvaluationAverage.getRatingAverages().get(3).getAverageScore()).isCloseTo(8.66, within(0.01));
         assertThat(peerEvaluationAverage.getRatingAverages().get(4).getAverageScore()).isCloseTo(8.0, within(0.01));
         assertThat(peerEvaluationAverage.getRatingAverages().get(5).getAverageScore()).isCloseTo(8.0, within(0.01));
+    }
+
+    @Test
+    void testGetPeerEvaluationAverageForADeactivatedStudent() {
+        // Given: she is marked, not omitted, and the evaluations of her on record are kept (BR-evaluatee-active)
+        this.eric.setEnabled(false);
+        given(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 4)).willReturn(this.ericsW31Evaluations);
+
+        // When
+        PeerEvaluationAverage peerEvaluationAverage = this.evaluationService.getPeerEvaluationAverage("2023-W31", eric);
+
+        // Then
+        assertThat(peerEvaluationAverage.isDeactivated()).isTrue();
+        assertThat(peerEvaluationAverage.getPublicComments()).hasSize(this.ericsW31Evaluations.size());
+        assertThat(peerEvaluationAverage.getAverageTotalScore()).isCloseTo(50.0, within(0.01));
     }
 
     @Test
