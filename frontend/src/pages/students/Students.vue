@@ -35,8 +35,8 @@
       <el-table-column label="Team" prop="teamName"></el-table-column>
       <el-table-column label="Status" prop="enabled">
         <template #default="{ row }">
-          <el-tag type="success" v-if="row.enabled">Enabled</el-tag>
-          <el-tag type="danger" v-else>Disabled</el-tag>
+          <el-tag type="success" v-if="row.enabled" data-cy="student-status">Active</el-tag>
+          <el-tag type="danger" v-else data-cy="student-status">Deactivated</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="Operations" width="120">
