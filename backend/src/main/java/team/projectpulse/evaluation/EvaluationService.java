@@ -67,6 +67,8 @@ public class EvaluationService {
             throw new PeerEvaluationIllegalArgumentException("The evaluator and evaluatee must be on the same team.");
         }
 
+        requireActiveEvaluatee(newPeerEvaluation.getEvaluatee());
+
         // Make sure this is not a duplicate evaluation
         if (this.evaluationRepository.findByWeekAndEvaluatorIdAndEvaluateeId(newPeerEvaluation.getWeek(), newPeerEvaluation.getEvaluator().getId(), newPeerEvaluation.getEvaluatee().getId()).isPresent()) {
             throw new PeerEvaluationIllegalArgumentException("You have already submitted an evaluation for " + newPeerEvaluation.getEvaluatee().getFirstName() + " in this week.");
@@ -81,12 +83,24 @@ public class EvaluationService {
                     // The week is read off the stored evaluation rather than off the update, because the caller
                     // writes the payload and could otherwise name an open week to reopen a closed evaluation.
                     requireOpenSubmissionWindow(oldEvaluation.getEvaluator().getSection(), oldEvaluation.getWeek(), WINDOW_CLOSED_MESSAGE);
+                    requireActiveEvaluatee(oldEvaluation.getEvaluatee());
                     rescore(oldEvaluation, update.getRatings());
                     oldEvaluation.setPublicComment(update.getPublicComment());
                     oldEvaluation.setPrivateComment(update.getPrivateComment());
                     return this.evaluationRepository.save(oldEvaluation);
                 })
                 .orElseThrow(() -> new ObjectNotFoundException("evaluation", evaluationId));
+    }
+
+    /**
+     * Refuses a peer evaluation of a deactivated teammate (BR-evaluatee-active, UC-EVA-submit-evaluation 9a). An edit
+     * runs the same check, because re-submitting is submitting (BR-evaluation-editable-until-close). Evaluations of
+     * her already on record are kept; only new writes are refused.
+     */
+    private void requireActiveEvaluatee(Student evaluatee) {
+        if (!evaluatee.isEnabled()) {
+            throw new PeerEvaluationIllegalArgumentException(evaluatee.getFirstName() + " " + evaluatee.getLastName() + " is deactivated and can no longer be evaluated.");
+        }
     }
 
     /**
@@ -178,6 +192,8 @@ public class EvaluationService {
         peerEvaluationAverage.setFirstName(student.getFirstName());
         peerEvaluationAverage.setLastName(student.getLastName());
         peerEvaluationAverage.setEmail(student.getEmail());
+        // A deactivated student stays in the report with her evaluations, marked rather than omitted (BR-evaluatee-active)
+        peerEvaluationAverage.setDeactivated(!student.isEnabled());
         // Student.team is optional: a student is enrolled in a course section before she is assigned to a team, and
         // BR-team-assignment-required keeps her from authoring until she is, so the team name is simply absent for
         // her. Dereferencing it here was a 500 on her own results page and on the instructor's performance dashboard

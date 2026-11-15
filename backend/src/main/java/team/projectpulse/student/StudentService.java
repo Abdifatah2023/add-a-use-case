@@ -4,6 +4,7 @@ import team.projectpulse.section.Section;
 import team.projectpulse.section.SectionRepository;
 import team.projectpulse.system.UserUtils;
 import team.projectpulse.system.exception.ObjectNotFoundException;
+import team.projectpulse.system.exception.StudentAlreadyDeactivatedException;
 import team.projectpulse.user.userinvitation.UserInvitationService;
 import jakarta.transaction.Transactional;
 import org.springframework.data.domain.Page;
@@ -116,13 +117,35 @@ public class StudentService {
 
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
 
-        // If the user is an admin, then the user can update all the fields
+        // An instructor may re-enable a deactivated student here, but never deactivate one: deactivation goes only
+        // through deactivateStudent, the path with the warning, the confirmation, and its own authorization rule
+        // (UC-STU-deactivate-student). Re-enabling stays here until UC-STU-reactivate-student is built
+        // (TD-student-reactivation-stopgap in docs/design/stu.md).
         if (authentication.getAuthorities().stream().anyMatch(grantedAuthority -> grantedAuthority.getAuthority().equals("ROLE_instructor"))) {
-            oldStudent.setEnabled(update.isEnabled());
+            if (update.isEnabled()) {
+                oldStudent.setEnabled(true);
+            }
 //            oldStudent.setRoles(update.getRoles());
         }
 
         return this.studentRepository.save(oldStudent);
+    }
+
+    /**
+     * Deactivates a student (UC-STU-deactivate-student): she can no longer log in or reach any protected resource,
+     * and she stays in her course section and on her team with all her submitted work (BR-student-lifecycle).
+     * Only {@code enabled} changes. The caller's scope was already checked by the route rule.
+     *
+     * @throws StudentAlreadyDeactivatedException if she is already deactivated (extension 6a)
+     */
+    public Student deactivateStudent(Integer studentId) {
+        Student student = this.studentRepository.findById(studentId)
+                .orElseThrow(() -> new ObjectNotFoundException("student", studentId));
+        if (!student.isEnabled()) {
+            throw new StudentAlreadyDeactivatedException();
+        }
+        student.setEnabled(false);
+        return this.studentRepository.save(student);
     }
 
     public void deleteStudent(Integer studentId) {

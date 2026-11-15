@@ -182,7 +182,9 @@ onMounted(async () => {
 async function loadStudents() {
   // On the back end, the page number starts from 0, so subtract 1 here
   const result: FindStudentByTeamIdResponse = await findStudentsByTeamId(teamId.value)
-  students.value = result.data
+  // UC-EVA-submit-evaluation step 2: only active team members are offered. "Every team member must be evaluated"
+  // is enforced over these rows, so this is what makes it every *active* team member (BR-evaluatee-active).
+  students.value = result.data.filter((student) => student.enabled === true)
 }
 
 // Load criteria information
@@ -204,7 +206,10 @@ async function prepareStartingPeerEvaluations() {
 
   // If the student has already submitted evaluations for the current week, load them
   if (result.data.length > 0) {
-    peerEvalutions.value = result.data
+    // A teammate deactivated since these were submitted is no longer offered, so re-saving does not try to
+    // re-submit an evaluation of her, which the server would refuse (UC-EVA-submit-evaluation 9a)
+    const activeIds = new Set(students.value.map((student) => student.id))
+    peerEvalutions.value = result.data.filter((evaluation) => activeIds.has(evaluation.evaluateeId))
     isNewSubmission = false
   } else {
     // If not, create a new set of evaluations

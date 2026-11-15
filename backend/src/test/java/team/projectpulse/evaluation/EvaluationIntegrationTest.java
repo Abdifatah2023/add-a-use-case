@@ -7,6 +7,8 @@ import team.projectpulse.AbstractIntegrationTest;
 import team.projectpulse.evaluation.dto.PeerEvaluationDto;
 import team.projectpulse.evaluation.dto.RatingDto;
 import team.projectpulse.system.StatusCode;
+import team.projectpulse.user.PeerEvaluationUser;
+import team.projectpulse.user.UserRepository;
 import org.hamcrest.Matchers;
 import org.json.JSONObject;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +60,9 @@ public class EvaluationIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     EntityManager entityManager;
+
+    @Autowired
+    UserRepository userRepository;
 
     String adminBingyangToken;
 
@@ -787,6 +792,89 @@ public class EvaluationIntegrationTest extends AbstractIntegrationTest {
                 .andExpect(jsonPath("$.flag").value(false))
                 .andExpect(jsonPath("$.code").value(StatusCode.INVALID_ARGUMENT))
                 .andExpect(jsonPath("$.message").value("The ratings are not valid. Please make sure all criteria in the rubric are rated and each criterion is rated only once."));
+    }
+
+
+    // ---- BR-evaluatee-active: UC-EVA-submit-evaluation 9a and the section report, built with UC-STU-deactivate-student
+
+    private PeerEvaluationUser user(String username) {
+        return this.userRepository.findByUsername(username).orElseThrow();
+    }
+
+    private List<RatingDto> sixRatings() {
+        return List.of(new RatingDto(null, 1, 4.0), new RatingDto(null, 2, 9.0), new RatingDto(null, 3, 7.0),
+                new RatingDto(null, 4, 10.0), new RatingDto(null, 5, 5.0), new RatingDto(null, 6, 6.0));
+    }
+
+    @Test
+    @DisplayName("9a: an evaluation of a deactivated teammate is refused, and the others are still saved")
+    void testStudentJohnCannotEvaluateADeactivatedTeammate() throws Exception {
+        LocalDate fixedDate = LocalDate.of(2023, 9, 15); // Previous week is 2023-W36
+        Clock fixedClock = Clock.fixed(fixedDate.atStartOfDay(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
+        given(this.clock.instant()).willReturn(fixedClock.instant());
+        given(this.clock.getZone()).willReturn(fixedClock.getZone());
+        user("e.hudson@abc.edu").setEnabled(false);
+        Integer jerryId = user("j.moon@abc.edu").getId();
+
+        PeerEvaluationDto ofEric = new PeerEvaluationDto(null, "2023-W36", 4, "John Smith", 5, "Eric Hudson", sixRatings(), 41.0, "Good job", "Keep it up", null, null);
+        this.mockMvc.perform(post(this.baseUrl + "/evaluations").contentType(MediaType.APPLICATION_JSON).content(this.jsonMapper.writeValueAsString(ofEric)).accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.studentJohnToken))
+                .andExpect(jsonPath("$.flag").value(false))
+                .andExpect(jsonPath("$.code").value(StatusCode.INVALID_ARGUMENT))
+                .andExpect(jsonPath("$.message").value("Eric Hudson is deactivated and can no longer be evaluated."));
+
+        PeerEvaluationDto ofJerry = new PeerEvaluationDto(null, "2023-W36", 4, "John Smith", jerryId, "Jerry Moon", sixRatings(), 41.0, "Good job", "Keep it up", null, null);
+        this.mockMvc.perform(post(this.baseUrl + "/evaluations").contentType(MediaType.APPLICATION_JSON).content(this.jsonMapper.writeValueAsString(ofJerry)).accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.studentJohnToken))
+                .andExpect(jsonPath("$.flag").value(true))
+                .andExpect(jsonPath("$.data.evaluateeId").value(jerryId));
+
+        assertThat(this.evaluationRepository.findByWeekAndEvaluatorIdAndEvaluateeId("2023-W36", 4, 5)).isEmpty();
+        assertThat(this.evaluationRepository.findByWeekAndEvaluatorIdAndEvaluateeId("2023-W36", 4, jerryId)).isPresent();
+    }
+
+    @Test
+    @DisplayName("9a: re-submitting an evaluation of a teammate deactivated since is refused")
+    void testStudentJohnCannotUpdateAnEvaluationOfADeactivatedTeammate() throws Exception {
+        LocalDate fixedDate = LocalDate.of(2023, 8, 8); // Previous week is 2023-W31, evaluation 1's week
+        Clock fixedClock = Clock.fixed(fixedDate.atStartOfDay(ZoneId.systemDefault()).toInstant(), ZoneId.systemDefault());
+        given(this.clock.instant()).willReturn(fixedClock.instant());
+        given(this.clock.getZone()).willReturn(fixedClock.getZone());
+        user("e.hudson@abc.edu").setEnabled(false);
+        String commentBefore = this.evaluationRepository.findById(1).orElseThrow().getPublicComment();
+
+        PeerEvaluationDto update = new PeerEvaluationDto(1, "2023-W31", 4, "John Smith", 5, "Eric Hudson", sixRatings(), 41.0, "Changed", "Changed", null, null);
+        this.mockMvc.perform(put(this.baseUrl + "/evaluations/1").contentType(MediaType.APPLICATION_JSON).content(this.jsonMapper.writeValueAsString(update)).accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.studentJohnToken))
+                .andExpect(jsonPath("$.flag").value(false))
+                .andExpect(jsonPath("$.code").value(StatusCode.INVALID_ARGUMENT))
+                .andExpect(jsonPath("$.message").value("Eric Hudson is deactivated and can no longer be evaluated."));
+        assertThat(this.evaluationRepository.findById(1).orElseThrow().getPublicComment()).isEqualTo(commentBefore);
+    }
+
+    @Test
+    @DisplayName("The section report lists a deactivated student, marked, with the evaluations of her on record")
+    void testSectionReportMarksADeactivatedStudent() throws Exception {
+        user("e.hudson@abc.edu").setEnabled(false);
+        int evaluationsOfEric = this.evaluationRepository.findByWeekAndEvaluateeId("2023-W31", 5).size();
+        assertThat(evaluationsOfEric).isPositive();
+
+        this.mockMvc.perform(get(this.baseUrl + "/evaluations/sections/2/week/2023-W31").accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.adminBingyangToken))
+                .andExpect(jsonPath("$.flag").value(true))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages", Matchers.hasSize(11)))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 5)].deactivated").value(Matchers.contains(true)))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 5)].publicComments[*]", Matchers.hasSize(evaluationsOfEric)))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 4)].deactivated").value(Matchers.contains(false)));
+    }
+
+    @Test
+    @DisplayName("For a week with no evaluations of her, a deactivated student is still listed, with empty scores")
+    void testSectionReportListsADeactivatedStudentWithNoEvaluationsThatWeek() throws Exception {
+        user("e.hudson@abc.edu").setEnabled(false);
+        assertThat(this.evaluationRepository.findByWeekAndEvaluateeId("2023-W40", 5)).isEmpty();
+
+        this.mockMvc.perform(get(this.baseUrl + "/evaluations/sections/2/week/2023-W40").accept(MediaType.APPLICATION_JSON).header(HttpHeaders.AUTHORIZATION, this.adminBingyangToken))
+                .andExpect(jsonPath("$.flag").value(true))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 5)].deactivated").value(Matchers.contains(true)))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 5)].averageTotalScore").value(Matchers.contains(0.0)))
+                .andExpect(jsonPath("$.data.peerEvaluationAverages[?(@.studentId == 5)].publicComments[*]", Matchers.empty()));
     }
 
 }
